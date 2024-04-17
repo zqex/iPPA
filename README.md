@@ -1,5 +1,5 @@
 # iPPA
-Inverse Primitive Path Analysis extension for LAMMPS
+Inverse Primitive Path Analysis package for LAMMPS
 
 # Compiling
 
