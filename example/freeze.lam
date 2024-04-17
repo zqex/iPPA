@@ -1,0 +1,27 @@
+#
+#  Small stage to cool down the KG model before starting the PPA contraction process.
+#  High friction, small timesteps, large spring constant.
+#
+
+pair_style      lj/cut ${cutoff}
+pair_coeff      * * 1.0 1.0
+pair_modify     shift yes
+
+bond_style      fenehalt
+bond_coeff      *   ${kspring} 1.5 0.0 1.0 1.40
+
+angle_style     cosine
+angle_coeff     * ${kappa}
+special_bonds lj 1 1 1
+
+variable unity equal 1.0
+thermo_style custom step temp epair ebond eangle c_bmin  c_bavg  c_bmax  c_pmin  v_unity
+thermo 1
+
+fix dynamics   mobile langevin ${tfreeze} ${tfreeze}   ${tdampfreeze}   325439524
+
+timestep ${tstepfreeze}
+run ${runfreeze}
+
+unfix dynamics
+

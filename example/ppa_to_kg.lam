@@ -1,0 +1,20 @@
+#
+# Inverse PPA gradually  changing from PPA force field to KG at T=0
+#
+
+include "ppaforcefield0.lam"
+
+variable ramp_up   equal "ramp(0.00,1.00)"
+thermo     1
+thermo_style custom step temp epair ebond eangle c_bmin  c_bavg  c_bmax  c_pmin   f_topo[2] v_ramp_up
+
+fix iPPA      all    adapt  1  pair wca/ppa lambda ${atypebead} ${atypebead} v_ramp_up  &
+                               pair topo    lambda ${atypetopo} ${atypetopo} v_ramp_up
+fix dynamics  mobile langevin ${ppatemp} ${ppatemp}   ${tdampppa}   325439524
+
+timestep ${tstepppa}
+run     ${runppa}
+
+unfix dynamics
+unfix iPPA
+

@@ -1,0 +1,33 @@
+variable unity equal 1.0
+thermo_style custom step temp epair ebond eangle c_bmin  c_bavg  c_bmax  c_pmin  v_unity
+thermo 1
+
+comm_modify cutoff 1
+
+#
+#  Run KG simulation for runeq steps using proper temperature and angle
+#
+
+pair_style      lj/cut ${cutoff}
+pair_coeff      * * 1.0 1.0
+pair_modify     shift yes
+
+bond_style      fenehalt
+bond_coeff      * 30.0 1.5 0.0 1.0 1.49
+
+angle_style     cosine
+angle_coeff     * ${kappa}
+special_bonds lj 1 1 1
+
+#
+#small equilibration stage with temperature 1 but high friction and short time steps.
+#
+
+fix dynamics   mobile langevin 1.0 1.0   ${tdampwarmup}   325439524
+timestep ${tstepwarmup}
+run     ${runwarmup}
+unfix dynamics
+
+
+
+

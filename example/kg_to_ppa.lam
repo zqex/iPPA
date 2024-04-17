@@ -1,0 +1,26 @@
+
+#
+# Again perform PPA process starting from a frozen KG configuration
+#
+
+
+include "ppaforcefield1.lam"
+
+
+
+variable ramp_down equal "ramp(1.00,0.00)"
+thermo 1
+thermo_style custom step temp epair ebond eangle c_bmin  c_bavg  c_bmax  c_pmin f_topo[2] v_ramp_down  
+
+
+timestep ${tstepppa}
+fix iPPA      all    adapt  1  pair wca/ppa lambda ${atypebead} ${atypebead} v_ramp_down  &
+                               pair topo    lambda ${atypetopo} ${atypetopo} v_ramp_down
+
+fix dynamics   mobile langevin ${ppatemp} ${ppatemp}   ${tdampppa}   325439524
+
+run ${runippa}
+
+unfix iPPA
+unfix dynamics
+

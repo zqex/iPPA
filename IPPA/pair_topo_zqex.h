@@ -10,7 +10,8 @@
 
    See the README file in the top-level LAMMPS directory.
    
-   
+   Modified from ../MISC/pair_srp.h
+
     Pair-style that continuously performs PPA as a control parameter is varied
 
     Arguments 
@@ -20,27 +21,27 @@
         window  integer          Chemical distance to switch off pair interactions
                                  Default 10
         
-        alpha   double>0         Exponent for stretching switching/compression process
+        alpha   double>0         Exponent for iPPA switching potential
                                  Default 1
         
         u0      double>=0        Maximal energy at overlap for calculating the inner cutoff
      or beta0   0<=double<=1     Inner cutoff
                                  Default beta=0.817505 corresponding to U0=100
      
-        lambda  0<=double<=1     Initial value for mixing parameter.  (before fix adapt)
+        lambda  0<=double<=1     Initial value for mixing parameter.  (before fix adapt modifies it)
                                  Default 1.0  (full KG force field)
         
         circular                 Assume chains have circular connectivity
                                  Default false   assumes linear chains.
    
         flip                     Flips bond pairs that has crossed back to their original position, and flips velocity vectors.
+                                 (Experimental feature!)
 
         debug                    Save topology violations to a per-core debug file.
                                  Default false.
    
 ------------------------------------------------------------------------- */
 
-//  Modified from ../MISC/pair_srp.h
 
 #ifdef PAIR_CLASS
 // clang-format off

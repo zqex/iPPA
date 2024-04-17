@@ -11,12 +11,12 @@
    See the README file in the top-level LAMMPS directory.
 -------------------------------------------------------------------------
 
+  poly06 is a 6th order taylor expansion of a bond around the equilibrium distance r0.
 
-  U(r)= u0 + k1(r-r0) + k2(r-r0)^2 + k3(r-r0)^3 + k4(r-r0)^4  + k5(r-r0)^5  + k6(r-r0)^6
+  U(r)= k0 + k1(r-r0) + k2(r-r0)^2 + k3(r-r0)^3 + k4(r-r0)^4  + k5(r-r0)^5  + k6(r-r0)^6
   
-
-bond_style poly06
-bond_coeff 1  <r0>  <u0> <k1> <k2> <k3> <k4>  <k5> <k6>
+  bond_style poly06
+  bond_coeff *  <r0>  <k0> <k1> <k2> <k3> <k4> <k5> <k6>
 
  */
 
@@ -44,8 +44,6 @@ class BondPoly06 : public Bond {
   void read_restart(FILE *) override;
   void write_data(FILE *) override;
   double single(int, double, int, int, double &) override;
-//  void born_matrix(int, double, int, int, double &, double &) override;
-//  void *extract(const char *, int &) override;
 
  protected:
   double *r0,*k0,*k1,*k2,*k3,*k4,*k5,*k6;

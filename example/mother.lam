@@ -1,0 +1,100 @@
+#
+#  Script to take a PPA and then invert it, and reheat.
+#
+#  lambda=0 is PPA
+#  lambda=1 is KG
+
+variable zero equal 0.0
+variable unity equal 1.0
+
+units              lj
+
+boundary           p p p
+atom_style         molecular
+neighbor           2.00 bin
+neigh_modify       every 1 delay 0 check yes
+neigh_modify       one 5000
+
+#setup global parameters:
+include "param.lam"
+
+#read_data ${input}
+read_data afterppa${run}.data.gz  nocoeff
+mass * ${mass}
+
+#setup all computes:
+
+compute pdist      all  pair/local dist
+compute bdist      all  bond/local dist
+compute bmax all   reduce max c_bdist
+compute bmin all   reduce min c_bdist
+compute bavg all   reduce ave c_bdist
+compute bavg2 all  reduce avesq c_bdist
+compute pmin all   reduce min c_pdist
+
+group mobile type 1
+group fixed type 2
+
+fix zero fixed setforce 0 0 0 
+fix integrator mobile nve/limit 0.1
+
+
+#freeze KG config
+#print "+---------------------------------------------------------------------------+"
+#print "| Freezing the configuration                                                |"
+#include freeze.lam
+#
+#
+#fix runningavg all ave/time 1 10000 10000 &
+#    c_thermo_press[1] c_thermo_press[2] c_thermo_press[3] &
+#    c_thermo_press[4] c_thermo_press[5] c_thermo_press[6] &
+#    title2 "#sampled 1 10000 10000  gjf vfull"    &
+#    file press_pre.t   format " %0.8g"
+#
+#Go to PPA state
+#print "+---------------------------------------------------------------------------+"
+#print "| Converting KG to PPA                                                      |"
+#include kg_to_ppa.lam
+#
+#Relax the PPA
+#
+#write_data afterppa${run}.data
+#shell gzip --force afterppa${run}.data
+
+include "ppaforcefield0.lam"
+thermo_style custom step temp epair ebond eangle c_bmin  c_bavg  c_bmax  c_pmin f_topo[2] v_zero
+timestep 0.01
+
+#unfix runningavg
+reset_timestep 0
+fix runningavg all ave/time 1 10000 10000 &
+    c_thermo_press[1] c_thermo_press[2] c_thermo_press[3] &
+    c_thermo_press[4] c_thermo_press[5] c_thermo_press[6] &
+    title2 "#sampled 1 10000 10000  gjf vfull"    &
+    file press_0.t   format " %0.8g"
+
+print "+---------------------------------------------------------------------------+"
+print "| Deforming the PPA                                                         |"
+
+fix def all deform 5 x scale ${scalex} y volume z volume remap x
+fix dynamics   mobile langevin ${ppatemp} ${ppatemp}   ${tdampppa}   325439524
+run 10000
+unfix dynamics
+unfix def
+
+#print "+---------------------------------------------------------------------------+"
+#print "| Relaxing the PPA                                                          |"
+#include ppa_langevin_relax.lam
+
+print "+---------------------------------------------------------------------------+"
+print "| Converting PPA to KG (T=0 at the end)                                     |"
+include ppa_to_kg.lam
+
+print "+---------------------------------------------------------------------------+"
+print "| Warmup KG melt                                                            |"
+include kg_warmup.lam
+
+write_data kg${run}.data
+shell gzip --force kg${run}.data
+
+write_restart run0.rest

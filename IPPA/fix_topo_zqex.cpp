@@ -20,11 +20,14 @@
     Modified from MISC/fix_srp.cpp
     
     Increased the per atom array from 2 to 3.
-    The dummy beads representing the bond centres carry 2 tags for tracking
-    the beads at the end of the bond.
-    All other beads carry the three coordinates of the previous timestep.
+    
+    SRP dummy beads introduced at the middle of each bond carry the two tags
+    for identifying which end beads define the bond.
+    
+    Real beads carry the position of the previous timestep.
 
-    Added topologyviolation and topologyviolationaccumulator counters
+    topologyviolation counts the global number of topology violations this timestep,
+    topologyviolationaccumulator counts the total topology violations so far.
 */
 
 #include "fix_topo_zqex.h"

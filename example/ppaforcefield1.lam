@@ -1,0 +1,24 @@
+#
+#  KG forcefield with topology violation counting enabled
+
+
+comm_modify cutoff 6
+
+pair_style      hybrid  wca/ppa   window ${nwindow} alpha ${power}  lambda  1.0  ${geometry}  u0 ${u0}                  &
+                        topo      window ${nwindow} alpha ${power}  lambda  1.0  ${geometry}  cutoff 2.0  bondtype *  debug
+pair_coeff      ${atypebead}  ${atypebead}    wca/ppa  1.0 1.0
+pair_coeff      ${atypebead}  ${atypetopo}    none
+pair_coeff      ${atypetopo}  ${atypetopo}    topo
+
+
+bond_style      poly06
+bond_coeff      *  0     0  0  50 0 0  0   100
+angle_style     none
+
+#
+# special bonds with 1 x x, since we need to use wca/ppa for bonded beads to switch the force field.
+#
+
+special_bonds lj 1 1 1
+
+

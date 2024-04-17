@@ -1,0 +1,20 @@
+variable zero equal 0.0
+thermo_style custom step temp epair ebond eangle c_bmin  c_bavg  c_bmax  c_pmin  v_zero  f_topo[2]
+thermo 1
+
+#include "ppaforcefield0.lam"
+
+#min_modify dmax 0.01
+#minimize 1e-10 1e-10 50000 50000
+
+variable zero equal 0.0
+thermo_style custom step temp epair ebond eangle c_bmin  c_bavg  c_bmax  c_pmin  f_topo[2] v_zero
+thermo 1
+
+fix dynamics   mobile langevin ${ppatemp} ${ppatemp}   ${tdamprelax}   325439524
+
+timestep ${tsteprelax}
+run ${runrelax}
+
+unfix dynamics
+

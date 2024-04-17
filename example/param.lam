@@ -1,0 +1,65 @@
+#Default
+
+variable mass        equal 1
+variable kspring     equal 100
+
+variable  geometry string ""       #or nothing if linear chain
+
+#keep track of regular beads, and the dummy beads introduced to keep track of bonds:
+variable    atypebead  string "1*2"
+variable    atypetopo  string "3"
+
+
+#Protocol
+
+variable nwindow equal 10      #number of bonds
+variable u0      equal 200     #ucap 100
+variable power   equal log(${nwindow})/log(2)      # half of the time for final bond.
+
+# deformation, volume deformation scaling 10% along x, and compressing along yz
+variable scalex equal 1.10
+
+#
+#  PPA transformation stage
+#
+
+variable tdampppa    equal  ${mass}/50
+variable ppatemp     equal  0.001       
+
+variable tstepppa    equal  0.005
+variable runppa      equal  10000
+variable runippa     equal  10000
+
+#freeze
+
+variable  tfreeze     equal 0.001
+variable  tdampfreeze equal ${mass}/50
+variable  tstepfreeze equal 0.005
+variable  runfreeze   equal 1000 
+
+#KG warmup
+
+variable tdampwarmup    equal  ${mass}/200
+variable tstepwarmup    equal 0.0001
+variable runwarmup      equal 2000
+
+# PPA langevin relaxation
+
+variable tdamprelax    equal  ${mass}/2
+variable ppatemp       equal  0.001       
+variable tsteprelax    equal  0.006
+variable runrelax      equal  8000
+
+# KG simulation
+
+variable timestepkg   equal 0.01
+variable frictionkg   equal 0.5
+variable tdampkg      equal  ${mass}/${frictionkg}
+
+variable runeq        equal 1000000
+
+variable cutoff   equal  2^(1/6)
+
+
+
+

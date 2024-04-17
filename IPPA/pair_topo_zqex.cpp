@@ -24,9 +24,8 @@ See the doc page for pair_style srp command for usage instructions.
 There is an example script for this package in examples/PACKAGES/srp.
 
 Please contact Timothy Sirk for questions (tim.sirk@us.army.mil).
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
 
-/*
   Modified from ../MISC/pair_srp.cpp
   
   The SRP code bond has been removed, but this code is combined with fix topo to
@@ -75,11 +74,11 @@ static const char cite_srp[] =
 
 static const char cite_topo[] =
   "pair topo command: doi:XX\n\n"
-  "@Article{Svaneborg2023\n"
+  "@Article{Svaneborg2024\n"
   " author = {C. Svaneborg},\n"
   " title = {},\n"
-  " journal = {Comp. Phys. Comm.},\n"
-  " year =    2023,\n"
+  " journal = {Comput. Phys. Commun.},\n"
+  " year =    2024,\n"
   " volume =  xxx,\n"
   " pages =   {xxx}\n"
   "}\n\n";
