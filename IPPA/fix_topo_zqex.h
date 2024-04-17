@@ -44,8 +44,8 @@ class FixTopo : public Fix {
   void post_run() override;
   void post_force(int) override;
 
-  void min_pre_exchange();
-  void min_post_force( int );
+  void min_pre_exchange() override;
+  void min_post_force( int ) override;
 
   double memory_usage() override;
   void grow_arrays(int) override;
