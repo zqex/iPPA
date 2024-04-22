@@ -14,8 +14,14 @@
 
    The fix checks for topology violations for bonds crossing.
    
-   The first integer is the instantaneous number of topology violations.
-   The second integer is the accumulated number of violations.
+   Fix exports 4 integers
+   
+   1:  Instantaneous  (intra and inter) topology violations
+   2:  Accumulated    (intra and inter) topology violations
+   3:  Instantaneous  (inter only) topology violations
+   4:  Accumulated    (inter only) topology violations
+   
+   Thus most of the time you want option two.   
 
 ------------------------------------------------------------------------- */
 
