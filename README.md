@@ -239,8 +239,8 @@ The reference for the iPPA package is
   title={Inverse Primitive Path Analysis},
   author={Svaneborg, Carsten}
   journal={Computer Physics Communications},
-  volume={XX},
-  pages={XXXXX},
+  volume={300},
+  pages={109209},
   year={2024},
   doi={10.1016/j.cpc.2024.109209},
   url={https://doi.org/10.1016/j.cpc.2024.109209}
