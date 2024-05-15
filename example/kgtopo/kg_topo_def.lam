@@ -1,0 +1,87 @@
+#
+#  Run equilibrium KG simulation   with topology checking.
+#
+
+#setup global parameters:
+variable runeq1  equal 10000
+variable rundef  equal 10000
+variable runeq2  equal 100000
+# deformation, volume deformation scaling 10% along x, and compressing along yz
+variable scalex equal 1.10
+
+variable mass        equal 1
+#keep track of regular beads, and the dummy beads introduced to keep track of bonds:
+variable    atypebead  string "1*2"
+variable    atypetopo  string "3"
+
+
+units              lj
+
+boundary           p p p
+atom_style         molecular
+neighbor           0.75 bin
+neigh_modify       every 1 delay 0 check yes
+neigh_modify       one 5000
+
+
+read_data ${input} # extra/atom/types 1
+#read_restart run${runlast}.rest
+mass * ${mass}
+
+#setup all computes:
+compute pdist      all  pair/local dist
+compute bdist      all  bond/local dist
+compute bmax all   reduce max c_bdist
+compute bmin all   reduce min c_bdist
+compute bavg all   reduce ave c_bdist
+compute bavg2 all  reduce avesq c_bdist
+compute pmin all   reduce min c_pdist
+
+
+fix runningavg all ave/time 1 100 100 &
+    c_thermo_press[1] c_thermo_press[2] c_thermo_press[3] &
+    c_thermo_press[4] c_thermo_press[5] c_thermo_press[6] &
+    title2 "#sampled 1 100 100  gjf vfull"    &
+    file press_${run}.t   format " %0.8g"
+
+#
+#  Run KG simulation for runeq steps using proper temperature and angle
+#
+
+comm_modify cutoff 4
+variable cutoff  equal  2^(1/6)
+
+pair_style      hybrid  lj/cut ${cutoff}                 &
+                        topo      window 1    lambda  1.0   cutoff 2.0  bondtype *  debug
+pair_coeff      ${atypebead}  ${atypebead}    lj/cut  1.0 1.0
+pair_coeff      ${atypebead}  ${atypetopo}    none
+pair_coeff      ${atypetopo}  ${atypetopo}    topo
+
+bond_style      fenehalt
+bond_coeff      * 30.0 1.5 0.0 1.0 1.49
+
+angle_style     cosine
+angle_coeff     * ${kappa}
+special_bonds lj 1 1 1
+
+thermo_style custom step temp epair ebond eangle c_bmin  c_bavg  c_bmax  c_pmin  f_topo[2] f_topo[4]
+thermo 100
+
+timestep 0.01
+
+group mobile type 1
+group fixed type 2
+
+fix zero fixed setforce 0 0 0 
+fix dynamics   mobile langevin 1.0 1.0   2.0   325439524  gjf vfull
+fix integrator mobile nve
+run     ${runeq1}
+
+fix def all deform 5 x scale ${scalex} y volume z volume remap x
+run ${rundef}
+unfix def
+
+run     ${runeq2}
+
+shell mkdir rest
+write_restart rest/run${run}.rest
