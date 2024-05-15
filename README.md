@@ -184,11 +184,47 @@ When pair topo is used it internally creates a fix topo that can be used for dia
 informed about the switching process, no topology checks is performed between bonds that within the window where interactions are switched off. Using
 the difference between 2 and 4 gives an idea of how many topology violations are bonds cutting through other bonds on the same chain.
 
+# LAMMPS simulations with KG with topology check
+
+The topology checking code can be used e.g. during fast deformations to ensure that no bond
+cuts through another during the deformation. (For the complete code see the example folder)
+
+```
+variable    atypebead  string "1*2"
+variable    atypetopo  string "3"
+
+:
+comm_modify cutoff 4
+variable cutoff  equal  2^(1/6)
+
+pair_style      hybrid  lj/cut ${cutoff}                 &
+                        topo      window 1    lambda  1.0   cutoff 2.0  bondtype *  debug
+pair_coeff      ${atypebead}  ${atypebead}    lj/cut  1.0 1.0
+pair_coeff      ${atypebead}  ${atypetopo}    none
+pair_coeff      ${atypetopo}  ${atypetopo}    topo
+
+bond_style      fene
+bond_coeff      * 30.0 1.5 0.0 1.0
+
+angle_style     cosine
+angle_coeff     * ${kappa}
+special_bonds lj 1 1 1
+
+thermo_style custom step temp epair ebond eangle c_bmin  c_bavg  c_bmax  c_pmin  f_topo[2] f_topo[4]
+:
+```
+
+The code is very similar to the force field switches above, except the lambda parameter is constant 1.0
+signifying all beads interact as in the usual force field.  Only change is that instead of using
+wca/ppa pair potential, we use standard lj/cut potential. For consistency of energy output, I have chosen
+to switch off the WCA contribution to the FENE potential using special_bonds 1 1 1, but the standard
+choice could also be used.
+
+
 # SRP code
 
 The iPPA topology violation counting code is based on a modified version of the [LAMMPS SRP package]{https://docs.lammps.org/pair_srp.html} of Tim Sirk et al.
-This code works by inserting dummy beads at the center of each bond, and then using the neighbor lists of these dummy bonds to identify spatially
-neiboring bonds. The definition of pair_style topo automaticlly brings a fix topo to life. Fix topo augments particle information so they also carry their position at the previous time step, and various topology violation counters that are locally incremented when pair style topo identifies topology violations.
+This code works by inserting dummy beads at the center of each bond, and then using the neighbor lists of these dummy bonds to identify spatially neiboring bonds. The definition of pair_style topo automaticlly brings a fix topo to life. Fix topo augments particle information so they also carry their position at the previous time step, and various topology violation counters that are locally incremented when pair style topo identifies topology violations.
 
 See T. W. Sirk, Y.R. Slizoberg, J.K. Brennan, M. Lisal, and J.W. Andzelm. (2012).
 ["An enhanced entangled polymer model for dissipative particle dynamics."]{https://doi.org/10.1063/1.3698476} The Journal of Chemical Physics, 136, 134903.
@@ -209,4 +245,6 @@ The reference for the iPPA package is
   doi={10.1016/j.cpc.2024.109209},
   url={https://doi.org/10.1016/j.cpc.2024.109209}
 }
+
+
 ```
