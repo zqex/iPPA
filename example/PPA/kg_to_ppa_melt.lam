@@ -1,8 +1,20 @@
 #
-#  Script to take a network and then PPA it.
+#  LAMMPS script to apply PPA to melts using the iPPA force field transformation
 #
-#  lambda=1 is KG
-#  lambda=0 is PPA
+#  Assumptions internal beads should be type 1 and they are allowed to relax, 
+#              end beads should be type 2, and they are fixed in space.
+#
+#   Process: 
+#       1) The melt is frozen to T=0 with the KG force field during ${runfreeze} = 1000 steps
+#       2) The iPPA is run removing interactions within ${nwindow}=10 during a simulation of ${runippa} = 10000 steps.
+#       3) Energy minimizatio is run for 50000 steps.
+#       4) T=0 Langevin dynamics is run for ${runrelax}=500000 steps.
+#       5) Energy minimizatio is run for 50000 steps.
+#       6) Configuration is saved.
+#
+#  During the simulation lppa.t stores statistics of bond lengths  note this is not saved
+#  during minimization.
+#
 
 variable zero equal 0.0
 variable unity equal 1.0
@@ -32,11 +44,7 @@ compute bavg2 all  reduce avesq c_bdist  inputs local
 compute pmin all   reduce min c_pdist    inputs local
 
 
-fix bondstat   all  ave/time 100 1 100      c_bavg  c_bavg2    file ${base}.lppa.t
-
-compute msd all   msd
-fix g1stat     all  ave/time 1000 1 1000    c_msd[4]           file ${base}.msd.t
-
+fix bondstat   all  ave/time 100 1 100      c_bavg  c_bavg2    file lppa.t
 
 group mobile type 1
 group fixed type 2
@@ -76,25 +84,11 @@ unfix dynamics
 
 #Go to PPA state
 print "+---------------------------------------------------------------------------+"
-print "| Converting KG to PPA                                                      |"
+print "| Converting KG to PPA   using the iPPA force field transformation          |"
 
-#
-# Save bond energy taking out the spring constant, for easy mapping
-# to Kuhn units later.
-#
-#  u = k2 x^2 = 0.5 kspring x^2  => k2*2 = kspring
-#
 
 variable kppa2 equal 50
 variable kppaspring equal 2*${kppa2}
-
-compute epotbond all   pe    bond
-compute epotpair all   pe    pair
-
-variable edensbondred   equal  c_epotbond/vol/${kppaspring}
-variable edenspair      equal  c_epotpair/vol
-variable edensbond      equal  c_epotbond/vol
-fix energystat all  ave/time 100 1 100   v_edensbondred   v_edenspair v_edensbond  file ${base}.energydens.t  title1 "#ebond/vol/kspring epair/vol ebond/vol"
 
 
 pair_style      wca/ppa   window ${nwindow} alpha ${power}  lambda  1.0  ${geometry}  u0 ${u0}
@@ -130,32 +124,33 @@ bond_style      poly06
 bond_coeff      *  0     0  0  ${kppa2} 0 0  0   100
 angle_style     none
 
+#energy minimization
 min_modify dmax 0.1
 minimize 1e-10 1e-10 50000 50000
 
+#Langevin dynamics
 fix dynamics   mobile langevin ${ppatemp} ${ppatemp}   ${tdamprelax}   325439524
 timestep ${tsteprelax}
 run ${runrelax}
 unfix dynamics
 
+#energy minimization
 min_modify dmax 0.1
 minimize 1e-10 1e-10 50000 50000
 
-#
-# generate fix ave output
-#
+#Short run to save bond statistic after the final energy minimization
+
 fix dynamics   mobile langevin ${ppatemp} ${ppatemp}   ${tdamprelax}   325439524
 timestep ${tsteprelax}
 run 10000
 unfix dynamics
 
+unfix bondstat
+
 print "+---------------------------------------------------------------------------+"
 print "| Saving the PPA                                                            |"
 
-
-unfix bondstat
-
-write_data ${base}.ppa.data  nocoeff
-shell gzip --force ${base}.ppa.data
+write_data ppa.data  nocoeff
+shell gzip --force ppa.data
 
 
