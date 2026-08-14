@@ -33,6 +33,7 @@ Please contact Timothy Sirk for questions (tim.sirk@us.army.mil).
   
 */
 
+
 #include "pair_topo_zqex.h"
 
 #include "atom.h"
@@ -48,6 +49,7 @@ Please contact Timothy Sirk for questions (tim.sirk@us.army.mil).
 #include "neighbor.h"
 #include "output.h"
 #include "thermo.h"
+#include "text_file_reader.h"
 
 #include "update.h"
 #include <cmath>
@@ -87,7 +89,7 @@ static const char cite_topo[] =
  set size of pair comms in constructor
  ---------------------------------------------------------------------- */
 
-PairTopo::PairTopo(LAMMPS *lmp) : Pair(lmp), moleculebeadmax(nullptr), moleculebeadmin(nullptr)
+PairTopo::PairTopo(LAMMPS *lmp) : Pair(lmp), moleculebeadmax(nullptr), moleculebeadmin(nullptr), molmap(nullptr), indexmap(nullptr), topomap(nullptr)
 {
   writedata = 1;
   single_enable = 0;
@@ -103,6 +105,7 @@ PairTopo::PairTopo(LAMMPS *lmp) : Pair(lmp), moleculebeadmax(nullptr), moleculeb
   circular=false;
   doFlip=false;
   debug=false;
+  hasMap=false;
 
   // create fix SRP instance here with unique fix id
   // similar to granular pair styles with history,
@@ -160,8 +163,15 @@ PairTopo::~PairTopo()
     memory->destroy(cut);
     memory->destroy(segment);
   }
-  if (moleculebeadmax) memory->destroy(moleculebeadmax); moleculebeadmax=nullptr;
-  if (moleculebeadmin) memory->destroy(moleculebeadmin); moleculebeadmin=nullptr;
+  
+  if (hasMap)
+       {
+          memory->destroy(molmap);
+          memory->destroy(indexmap);
+          memory->destroy(topomap);
+       }
+  if (moleculebeadmax) memory->destroy(moleculebeadmax);
+  if (moleculebeadmin) memory->destroy(moleculebeadmin);
 
   // check nfix in case all fixes have already been deleted
   if (modify->nfix && modify->get_fix_by_id(f_topo->id)!=nullptr)
@@ -198,7 +208,7 @@ void PairTopo::compute(int eflag, int vflag)
     double dx,dy,dz,ti,tj;
     double **xlast= f_topo->array;
     int *tag = atom->tag;
-    tagint *molecule = atom->molecule;
+//    tagint *molecule = atom->molecule;
     
     // mapping global to local for atoms inside bond particles
     // exclude 1-2 neighs if requested
@@ -213,7 +223,7 @@ void PairTopo::compute(int eflag, int vflag)
   if (lambda==0) w=nwindow;
   if (lambda==1) w=0;
 
-  if (circular && (!moleculebeadmin || !moleculebeadmax))
+  if ((circular || hasMap) && (!moleculebeadmin || !moleculebeadmax))
      {
         if (debug) 
            utils::logmesg(lmp,fmt::format("PairTopo: compute  circular={}  moleculebeadmin={} moleculebeadmax={}\n",circular,(void*)moleculebeadmin,(void*)moleculebeadmax));
@@ -253,29 +263,37 @@ void PairTopo::compute(int eflag, int vflag)
         i1 = segment[j][0];
         j1 = segment[j][1];
 
+        // Skip connected bonds, since topology check makes no sense in this case.
+        if (i0 == i1 || i0 == j1 || i1 == j0 || j0 == j1) continue;
+
         // Find molecule of bond. This is only defined if both beads in the bond belong to the same molecule.
         mol0=-1;
-        if (molecule[i0]==molecule[j0]) mol0=molecule[j0];
+        if (getmol(i0)==getmol(j0)) mol0=getmol(i0);
 
         mol1=-1;
-        if (molecule[i1]==molecule[j1]) mol1=molecule[j1];
+        if (getmol(i1)==getmol(j1)) mol1=getmol(i1);
 
         // Topology check, only worry about chemical distance, if bonds can be assigned to molecules, and
         //  they belong to the same molecule. Then calculate chemical distance and compare to current chemical window
-                    
+       
         if (mol0>-1 && mol1>-1 && mol0 == mol1)         // Intramolecular bond pair.
            {
+              int tagi0=getindex(i0);
+              int tagi1=getindex(i1);
+              int tagj0=getindex(j0);
+              int tagj1=getindex(j1);
+
               // Chemical distance, since we do not know the order of beads in the two bond segments try all options.
-              int cdist=abs(tag[i0]-tag[i1]);           
-              if (abs(tag[i0]-tag[j1])<cdist) cdist=abs(tag[i0]-tag[j1]);
-              if (abs(tag[j0]-tag[i1])<cdist) cdist=abs(tag[j0]-tag[i1]);
-              if (abs(tag[j0]-tag[j1])<cdist) cdist=abs(tag[j0]-tag[j1]);
+              int cdist=abs(tagi0-tagi1);           
+              if (abs(tagi0-tagj1)<cdist) cdist=abs(tagi0-tagj1);
+              if (abs(tagj0-tagi1)<cdist) cdist=abs(tagj0-tagi1);
+              if (abs(tagj0-tagj1)<cdist) cdist=abs(tagj0-tagj1);
 
               // If circular we also have to look at distances across the starting and ending beads.
-              if (circular && cdist>0)                  // then look for chemical distance via end-to-end closure,
+              if (gettopo(i0) && cdist>0)                  // then look for chemical distance via end-to-end closure,
                  {                                      // if cdist==0 when one of the i0,j0 i1,j1 beads are the same, so two neighboring bonds.
-                      int mintag=MIN( MIN(tag[i0],tag[j0]), MIN(tag[i1],tag[j1]) );
-                      int maxtag=MAX( MAX(tag[i0],tag[j0]), MAX(tag[i1],tag[j1]) );
+                      int mintag=MIN( MIN(tagi0,tagj0), MIN(tagi1,tagj1) );
+                      int maxtag=MAX( MAX(tagi0,tagj0), MAX(tagi1,tagj1) );
                                        
                       //           length of head                 length of tail                and closure bond
                       int cdist2=  mintag-moleculebeadmin[mol0]  +moleculebeadmax[mol0]-maxtag  +1;
@@ -325,12 +343,23 @@ void PairTopo::compute(int eflag, int vflag)
                                , 0.25*(x[i0][2]+x[j0][2]+x[i1][2]+x[j1][2])
                                ,dx*dxlast+dy*dylast+dz*dzlast
                                 );
-                                
-                     for (int i=tag[i0]-5 ; i<=tag[j0]+5; i++)
+                     
+                     int beadmin=tag[i0];
+                     if (tag[i1]<beadmin) beadmin=tag[i1];
+                     if (tag[j0]<beadmin) beadmin=tag[j0];
+                     if (tag[j1]<beadmin) beadmin=tag[j1];
+
+                     int beadmax=tag[i0];
+                     if (tag[i1]>beadmax) beadmin=tag[i1];
+                     if (tag[j0]>beadmax) beadmin=tag[j0];
+                     if (tag[j1]>beadmax) beadmin=tag[j1];
+                     
+                     
+                     for (int i=beadmin ; i<=beadmin+5; i++)
                        {
                            int iii = atom->map(i);
                            if (iii==-1) continue;
-                           if (molecule[iii]!=molecule[i0]) continue;
+                           if (getmol(iii)!=getmol(beadmin)) continue;
 
                            fo << "\t\t" << i
                               << "     " << xlast[iii][0] << " " << xlast[iii][1] << " " << xlast[iii][2]
@@ -338,11 +367,11 @@ void PairTopo::compute(int eflag, int vflag)
                               << "\n";
                        }
 
-                     for (int i=tag[i1]-5 ; i<=tag[j1]+5; i++)
+                     for (int i=beadmin-1 ; i>beadmin-5; i--)
                        {
                            int iii = atom->map(i);
                            if (iii==-1) continue;
-                           if (molecule[iii]!=molecule[i1]) continue;
+                           if (getmol(iii)!=getmol(beadmin)) continue;
 
                            fo << "\t\t" << i
                               << "     " << xlast[iii][0] << " " << xlast[iii][1] << " " << xlast[iii][2]
@@ -350,6 +379,29 @@ void PairTopo::compute(int eflag, int vflag)
                               << "\n";
                        }
 
+                     for (int i=beadmax ; i<=beadmax+5; i++)
+                       {
+                           int iii = atom->map(i);
+                           if (iii==-1) continue;
+                           if (getmol(iii)!=getmol(beadmax)) continue;
+
+                           fo << "\t\t" << i
+                              << "     " << xlast[iii][0] << " " << xlast[iii][1] << " " << xlast[iii][2]
+                              << "     " << x    [iii][0] << " " << x    [iii][1] << " " << x    [iii][2]
+                              << "\n";
+                       }
+
+                     for (int i=beadmax-1 ; i>beadmax-5; i--)
+                       {
+                           int iii = atom->map(i);
+                           if (iii==-1) continue;
+                           if (getmol(iii)!=getmol(beadmax)) continue;
+
+                           fo << "\t\t" << i
+                              << "     " << xlast[iii][0] << " " << xlast[iii][1] << " " << xlast[iii][2]
+                              << "     " << x    [iii][0] << " " << x    [iii][1] << " " << x    [iii][2]
+                              << "\n";
+                       }
                                 
                      fo.close();
                   }
@@ -390,14 +442,13 @@ void PairTopo::EstimateMoleculeMinMax()
 
   int *tag = atom->tag;
   int nlocal = atom->nlocal;
-  tagint *molecule = atom->molecule;
    
   // Fix maximal molecule number globally:
   int moleculemax=0;
   int localmoleculemax=0;
   for (int i = 0; i < nlocal; i++)
        {
-         if (molecule[i]>localmoleculemax) localmoleculemax=molecule[i];
+         if (getmol(i)>localmoleculemax) localmoleculemax=getmol(i);
        }
   MPI_Allreduce(&localmoleculemax,&moleculemax,1,MPI_INT,MPI_MAX,world);
   moleculemax++;  // One larger than the largest molecule, makes space if there is a zero molecule.
@@ -419,8 +470,8 @@ void PairTopo::EstimateMoleculeMinMax()
 
   for (int i = 0; i < nlocal; i++)
      {
-        int m=molecule[i];
-        int t=tag[i];
+        int m=getmol(i);
+        int t=getindex(i);
         if (t<localmoleculebeadmin[m]) localmoleculebeadmin[m]=t;
         if (t>localmoleculebeadmax[m]) localmoleculebeadmax[m]=t;
      }
@@ -484,8 +535,17 @@ void PairTopo::settings(int narg, char **arg)
       if (lambda<0) error->all(FLERR,"Illegal pair_style topo command. lambda<0!");
       if (lambda>1) error->all(FLERR,"Illegal pair_style topo command. lambda>1!");
       iarg += 2; }
+    else 
+      if (strcmp(arg[iarg],"kg") == 0) {
+      lambda  = 1.0;
+      iarg += 1; }
+    else 
+      if (strcmp(arg[iarg],"ppa") == 0) {
+      lambda  = 0.0;
+      iarg += 1; }
      else 
       if (strcmp(arg[iarg],"circular") == 0) {
+      if (hasMap) error->all(FLERR,"Illegal pair_style topo command. circular and beadmap are mutually exclusive");
       circular=true;      
       iarg += 1; }        
      else 
@@ -496,6 +556,13 @@ void PairTopo::settings(int narg, char **arg)
       if (strcmp(arg[iarg],"debug") == 0) {
       debug=true;      
       iarg += 1; }        
+     else 
+      if (strcmp(arg[iarg],"beadmap") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal pair_style topo command. Missing beadmap argument");
+      if (circular) error->all(FLERR,"Illegal pair_style topo command. circular and beadmap are mutually exclusive");
+      
+      PPAreadmap(arg[iarg+1]);
+      iarg += 2; }       
      else error->all(FLERR,fmt::format("Illegal pair topo command. Unknown argument {}",arg[iarg]) );
   }
 
@@ -857,3 +924,58 @@ void *PairTopo::extract(const char *str, int &dim)
   if (strcmp(str,"lambda") == 0) return (void *)&lambda;
   return nullptr;
 }
+
+
+void PairTopo::PPAreadmap(char* file)
+{
+   if (comm->me == 0)
+    utils::logmesg(lmp,"Pair wca/ppa: Reading beadmap from {}\n",file);
+    
+   int natom = atom->natoms;
+   int nbond = atom->nbonds;
+
+   memory->create(molmap,natom+1,"Pair wca/ppa   allocating molmap");
+   memory->create(indexmap,natom+1,"Pair wca/ppa   allocating indexmap");
+   memory->create(topomap,natom+1,"Pair wca/ppa   allocating topomap");
+   
+   if (comm->me==0) 
+      {
+        try {
+         TextFileReader reader(file, "Pair wca/ppa reading bead file");
+         char * line;                  
+         int first=true;
+         
+         while(line = reader.next_line(2)) {
+         try {
+           ValueTokenizer values(line);
+
+           if (first)  // Check file against simulation
+              {
+                if (values.next_int()!=natom) error->all(FLERR,"Pair wca/ppa: beadmap number of atoms differs from current simulation!");
+                if (values.next_int()!=nbond) error->all(FLERR,"Pair wca/ppa: beadmap number of bonds differs from current simulation!");
+                first=false;
+              }
+            else
+              {       // Handle data
+                 int tag=values.next_int();
+                 molmap[tag]=values.next_int();
+                 indexmap[tag]=values.next_int();
+                 topomap[tag]= (values.next_int() == 0);   // 0 = circular   1=linear
+              }
+              
+             } catch (TokenizerException& e) { error->all(FLERR, e.what()); }
+   
+         }
+        } catch (TokenizerException& e) { error->all(FLERR, e.what()); }
+
+      }
+
+   MPI_Bcast(molmap  , natom+1, MPI_INT, 0, world);
+   MPI_Bcast(indexmap, natom+1, MPI_INT, 0, world);
+   MPI_Bcast(topomap , natom+1, MPI_CXX_BOOL, 0, world);
+
+}
+
+
+
+

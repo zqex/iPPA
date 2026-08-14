@@ -30,6 +30,11 @@
      
         lambda  0<=double<=1     Initial value for mixing parameter.  (before fix adapt modifies it)
                                  Default 1.0  (full KG force field)
+
+        beadmap  <file>          Assigns an integer to each bead. Beads with same integer 
+                                 can be contracted. molecule number is used if beadmap is
+                                 not specificied but this can lead to loss of entanglement
+                                 if used to perform PPA on polymer networks.
         
         circular                 Assume chains have circular connectivity
                                  Default false   assumes linear chains.
@@ -55,6 +60,7 @@ PairStyle(topo,PairTopo);
 #define LMP_PAIR_TOPO_H
 
 #include "pair.h"
+#include "atom.h"
 
 namespace LAMMPS_NS {
 
@@ -76,12 +82,14 @@ class PairTopo : public Pair {
   void *extract(const char *, int &) override;
   void EstimateMoleculeMinMax();
 
+
  protected:
   inline void onetwoexclude(int *&, int &, int *&, int *&, int **&);
   inline void remapBonds(int &);
   void allocate();
   void getMinDist(double **&, double &, double &, double &, double &, double &, int &, int &, int &,
                   int &);
+                  
   double **cut;
   double cut_global;
   int bptype;
@@ -89,6 +97,7 @@ class PairTopo : public Pair {
   class FixTopo *f_topo;
   int exclude, maxcount;
   int **segment;
+
 
 // chemical distance window:
   double nwindow;
@@ -99,6 +108,39 @@ class PairTopo : public Pair {
 
   int *moleculebeadmax; // maximal tag no in molecule
   int *moleculebeadmin; // minimal tag no in molecule
+    
+  // Use map file to specify molecule, index, topology for every bead
+  // PPA is applied within molecule, depending on chemical distance
+  // based on index differences, and correcting for circular chains
+  // if topology is circular.
+
+  bool hasMap;                
+  void PPAreadmap(char* str);
+  int *molmap,*indexmap;      
+  bool *topomap;
+
+  // resolve lookup
+  inline int getmol(int i)
+          {
+              if (hasMap) return molmap[atom->tag[i]];
+                     else return atom->molecule[i];
+          }
+
+  // resolve lookup
+  inline int getindex(int i)
+          {
+              if (hasMap) return indexmap[atom->tag[i]];
+                     else return atom->tag[i];
+          }
+
+  // resolve lookup
+  inline bool gettopo(int i)
+          {
+              if (hasMap) return topomap[atom->tag[i]];
+                     else return circular;
+          }
+
+
 };
 
 }    // namespace LAMMPS_NS

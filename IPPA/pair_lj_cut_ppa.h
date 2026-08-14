@@ -30,6 +30,14 @@
         
         circular                 Assume chains have circular connectivity
                                  Default false   assumes linear chains.
+                                 
+        beadmap  <file>          Assigns a unique number to sets of beads that can be contracted,
+                                 e.g. strands. The default is to use the molecule number and
+                                 hence PPA contract melts. But for networks, we should only allow
+                                 PPA contraction to occur within each strand as to avoid loosing
+                                 certain trapped entanglements involving the same precursor chain.
+
+        beadmap and circular can not be used simultaneously.
 
 ------------------------------------------------------------------------- */
 
@@ -43,6 +51,7 @@ PairStyle(wca/ppa,PairWCAPPA)
 #define LMP_PAIR_WCAPPA
 
 #include "pair.h"
+#include "atom.h"
 
 namespace LAMMPS_NS {
 
@@ -71,15 +80,48 @@ class PairWCAPPA : public Pair {
   double **epsilon,**sigma;
   double **lj1,**lj2,**lj3,**lj4,**offset;
   double *cut_respa;
-  
+
+  // Parameters:  
   double nwindow;
   double lambda;
   double alpha,beta,gamma;
-  bool circular;
+  bool circular; // Topology
   bool debug;
 
+  // only required if circular molecules present or if hasMap
   int *moleculebeadmax; // maximal tag no in molecule
   int *moleculebeadmin; // minimal tag no in molecule
+  
+  // Use map file to specify molecule, index, topology for every bead
+  // PPA is applied within molecule, depending on chemical distance
+  // based on index differences, and correcting for circular chains
+  // if topology is circular.
+
+  bool hasMap;                
+  void PPAreadmap(char* str);
+  int *molmap,*indexmap;      
+  bool *topomap;
+
+  // resolve lookup
+  inline int getmol(int i)
+          {
+              if (hasMap) return molmap[atom->tag[i]];
+                     else return atom->molecule[i];
+          }
+
+  // resolve lookup
+  inline int getindex(int i)
+          {
+              if (hasMap) return indexmap[atom->tag[i]];
+                     else return atom->tag[i];
+          }
+
+  // resolve lookup
+  inline bool gettopo(int i)
+          {
+              if (hasMap) return topomap[atom->tag[i]];
+                     else return circular;
+          }
 
   virtual void allocate();
 };

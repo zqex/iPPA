@@ -55,6 +55,7 @@ For |i-j|<n(x) there are no interactions.
 #include "memory.h"
 #include "error.h"
 #include "utils.h"
+#include "text_file_reader.h"
 
 #include <iostream>
 #include <cmath>
@@ -79,7 +80,7 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-PairWCAPPA::PairWCAPPA(LAMMPS *lmp) : Pair(lmp), moleculebeadmax(nullptr), moleculebeadmin(nullptr), debug(false)
+PairWCAPPA::PairWCAPPA(LAMMPS *lmp) : Pair(lmp), moleculebeadmax(nullptr), moleculebeadmin(nullptr), debug(false), molmap(nullptr), indexmap(nullptr), topomap(nullptr)
 {
   writedata = 1;
   single_enable=0;
@@ -92,6 +93,7 @@ PairWCAPPA::PairWCAPPA(LAMMPS *lmp) : Pair(lmp), moleculebeadmax(nullptr), molec
   beta=1.0;         // No warping
   lambda=1.0;       // Starting in KG force field.
   circular = false; // Linear molecules
+  hasMap=false;     // Default is to use molecule number
 
   if (lmp->citeme) lmp->citeme->add(cite_topo);
 }
@@ -115,6 +117,12 @@ PairWCAPPA::~PairWCAPPA()
     
     if (moleculebeadmax) memory->destroy(moleculebeadmax);
     if (moleculebeadmin) memory->destroy(moleculebeadmin);
+    if (hasMap) 
+       {
+         memory->destroy(molmap);
+         memory->destroy(indexmap);
+         memory->destroy(topomap);
+       }
   }
 }
 
@@ -139,7 +147,7 @@ void PairWCAPPA::compute(int eflag, int vflag)
   int newton_pair = force->newton_pair;
   tagint *molecule = atom->molecule;
 
-  if (circular && (!moleculebeadmin or !moleculebeadmax)) EstimateMoleculeMinMax();
+  if ((hasMap || circular) && (!moleculebeadmin || !moleculebeadmax)) EstimateMoleculeMinMax();
   if (!list) error->all(FLERR,"pair lj/cut/ppa called without a pair list");
 
   inum = list->inum;
@@ -148,10 +156,9 @@ void PairWCAPPA::compute(int eflag, int vflag)
   firstneigh = list->firstneigh;
   
   double W=pow(1-lambda,alpha)*nwindow+1;
-  
   int w=floor( W );
-  if (lambda==0) w=nwindow;
-  if (lambda==1) w=0;
+  if (lambda<=0) w=nwindow;
+  if (lambda>=1) w=0;
   
   double xx=pow(W-w,beta);
   double gamma0=gamma+(1-gamma)*xx;                     
@@ -176,40 +183,38 @@ void PairWCAPPA::compute(int eflag, int vflag)
       rsq = delx*delx + dely*dely + delz*delz;
       jtype = type[j];
 
-      if (rsq>=cutsq[itype][jtype]) continue;
+      if (rsq>=cutsq[itype][jtype]) continue;       
 
       double rcuti=gamma0*sigma[itype][jtype]*cut_global; 
       double rcuti2;
       int cdist;
-      bool fullLJ;
-      bool capLJ;
+      bool fullLJ=true;   // Default is full IA
+      bool capLJ=false;
 
-      if (lambda==1.0) { fullLJ=true; capLJ=false; }             // in this special case use full FF
-        else
-      if (molecule[i]!=molecule[j]) 
+      // Only apply PPA force field when
+      if ( lambda<1.0 && getmol(i)==getmol(j) )
         {
-           fullLJ=true; capLJ=false;
-        }
-      else
-        {
-              cdist=abs( tag[i]-tag[j] );                 // Chemical distance assuming consequtive bead numbers.
-              
-              if (circular)  // Also look for chemical distance via end-to-end closure
+              int tagi=getindex(i);
+              int tagj=getindex(j);
+   
+              cdist=abs( tagi-tagj );        // Linear chemical distance assuming consequtive beads              
+              if (gettopo(i))                // If bead belongs to circular structure look at ends:
                  {
-                      int cdist2=MIN(tag[i],tag[j])-moleculebeadmin[molecule[i]] + moleculebeadmax[molecule[i]]-MAX(tag[i],tag[j])+1;
+                      int cdist2=MIN(tagi,tagj)-MAX(tagi,tagj)+1
+                                 -moleculebeadmin[getmol(i)]+ moleculebeadmax[getmol(i)];
                       if (cdist2 < cdist) cdist=cdist2;
                  } 
               
               rcuti2=rcuti*rcuti;
- 
               fullLJ =   cdist>w  || ( cdist==w && rsq>=rcuti2 );
               capLJ  =   cdist==w && rsq<rcuti2;
         }
 
       if (!fullLJ && !capLJ) continue;                  // no interaction.
-      if (fullLJ && capLJ)      error->all(FLERR,"pair lj/cut/ppa impossible state");
+      if (fullLJ && capLJ)   error->one(FLERR,"pair lj/cut/ppa impossible state");
 
       double r,lj5,offset2;
+
 
       if (fullLJ) { // Calculate WCA interaction
                r2inv = 1.0/rsq;
@@ -222,8 +227,8 @@ void PairWCAPPA::compute(int eflag, int vflag)
                    evdwl *= factor_lj;
                   }
             }
-      if (capLJ)
-            {         // Calculate forcecap.
+
+      if (capLJ) { // Calculate forcecap.
                r=sqrt(rsq);
                double ratio=sigma[itype][jtype] / rcuti;
                double ratio2=ratio*ratio;
@@ -233,7 +238,8 @@ void PairWCAPPA::compute(int eflag, int vflag)
 
                lj5= 24*epsilon[itype][jtype]*( -ratio6 + 2*ratio12 )/rcuti; 
 
-               fpair = factor_lj*lj5/r;
+               if (r<1e-10) fpair=0;
+                       else fpair = factor_lj*lj5/r;
 
                 if (eflag) {
                    double offset2=4.0 * epsilon[itype][jtype] * (ratio12- ratio6)-offset[itype][jtype];
@@ -262,8 +268,8 @@ void PairWCAPPA::compute(int eflag, int vflag)
 
 void PairWCAPPA::EstimateMoleculeMinMax()
 /*
-  Find maximal & minimal bead numbers in all molecules. This is required for calculating chemical distances
-  for circular molecules.
+  Find maximal & minimal bead numbers in all molecules / strands.
+  This is required for calculating chemical distances for circular molecules.
 */
 {
   int *tag = atom->tag;
@@ -275,7 +281,7 @@ void PairWCAPPA::EstimateMoleculeMinMax()
   int localmoleculemax=0;
   for (int i = 0; i < nlocal; i++)
        {
-         if (molecule[i]>localmoleculemax) localmoleculemax=molecule[i];
+         if (getmol(i)>localmoleculemax) localmoleculemax=getmol(i);
        }
   MPI_Allreduce(&localmoleculemax,&moleculemax,1,MPI_INT,MPI_MAX,world);
   moleculemax++;  // One larger than the largest molecule, makes space if there is a zero molecule.
@@ -297,8 +303,8 @@ void PairWCAPPA::EstimateMoleculeMinMax()
 
   for (int i = 0; i < nlocal; i++)
      {
-        int m=molecule[i];
-        int t=tag[i];
+        int m=getmol(i);
+        int t=getindex(i);
         if (t<localmoleculebeadmin[m]) localmoleculebeadmin[m]=t;
         if (t>localmoleculebeadmax[m]) localmoleculebeadmax[m]=t;
      }
@@ -393,14 +399,30 @@ void PairWCAPPA::settings(int narg, char **arg)
       if (lambda<0) error->all(FLERR,"Illegal pair_style wca/ppa command. lambda<0!");
       if (lambda>1) error->all(FLERR,"Illegal pair_style wca/ppa command. lambda>1!");
       iarg += 2; }
+    else 
+      if (strcmp(arg[iarg],"kg") == 0) {
+      lambda  = 1.0;
+      iarg += 1; }
+    else 
+      if (strcmp(arg[iarg],"ppa") == 0) {
+      lambda  = 0.0;
+      iarg += 1; }
      else 
       if (strcmp(arg[iarg],"circular") == 0) {
+      if (hasMap) error->all(FLERR,"Illegal pair_style wca/ppa command. circular and beadmap are mutually exclusive");
       circular=true;      
       iarg += 1; }        
      else 
       if (strcmp(arg[iarg],"debug") == 0) {
       debug=true;      
-      iarg += 1; }        
+      iarg += 1; }
+     else 
+      if (strcmp(arg[iarg],"beadmap") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal pair_style wca/ppa command. Missing beadmap argument");
+      if (circular) error->all(FLERR,"Illegal pair_style wca/ppa command. circular and beadmap are mutually exclusive");
+      
+      PPAreadmap(arg[iarg+1]);
+      iarg += 2; }   
      else error->all(FLERR,fmt::format("Illegal pair wca/ppa command. Unknown argument {}",arg[iarg]) );
   }
   
@@ -414,6 +436,8 @@ void PairWCAPPA::settings(int narg, char **arg)
       utils::logmesg(lmp,fmt::format("Pair WCA/ppa: lambda={}\n",lambda)  );
       if (circular)   utils::logmesg(lmp, "Pair WCA/ppa: circular chains\n" );
                 else  utils::logmesg(lmp, "Pair WCA/ppa: linear chains\n" );
+      if (hasMap)     utils::logmesg(lmp, "Pair WCA/ppa: Using beadmap \n" );
+                
     }
     
   // reset cutoffs that have been explicitly set
@@ -621,3 +645,54 @@ void *PairWCAPPA::extract(const char *str, int &dim)
   if (strcmp(str,"lambda") == 0) return (void *)&lambda;
   return nullptr;
 }
+
+
+void PairWCAPPA::PPAreadmap(char* file)
+{
+   if (comm->me == 0)
+    utils::logmesg(lmp,"Pair wca/ppa: Reading beadmap from {}\n",file);
+    
+   int natom = atom->natoms;
+   int nbond = atom->nbonds;
+
+   memory->create(molmap,natom+1,"Pair wca/ppa   allocating molmap");
+   memory->create(indexmap,natom+1,"Pair wca/ppa   allocating indexmap");
+   memory->create(topomap,natom+1,"Pair wca/ppa   allocating topomap");
+   
+   if (comm->me==0) 
+      {
+        try {
+         TextFileReader reader(file, "Pair wca/ppa reading bead file");
+
+         char * line;                  
+         int first=true;
+         
+         while(line = reader.next_line(2)) {
+           ValueTokenizer values(line);
+
+           if (first)  // Check file against simulation
+              {
+                if (values.next_int()!=natom) error->one(FLERR,"Pair wca/ppa: beadmap number of atoms differs from current simulation!");
+                if (values.next_int()!=nbond) error->one(FLERR,"Pair wca/ppa: beadmap number of bonds differs from current simulation!");
+                first=false;
+              }
+            else
+              {       // Handle data
+                 int tag=values.next_int();
+                 molmap[tag]=values.next_int();
+                 indexmap[tag]=values.next_int();
+                 topomap[tag]= (values.next_int() == 0);   // 0 = circular   1=linear
+              }         
+            }
+   
+         } catch (std::exception &e) { error->one(FLERR, e.what()); }
+      }
+
+   MPI_Bcast(molmap  , natom+1, MPI_INT, 0, world);
+   MPI_Bcast(indexmap, natom+1, MPI_INT, 0, world);
+   MPI_Bcast(topomap , natom+1, MPI_CXX_BOOL, 0, world);
+
+}
+
+
+
